@@ -1,0 +1,30 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+
+  - repo: local
+    hooks:
+      - id: protected-branch-commit
+        name: Block commits on protected branches
+        entry: python scripts/git_hooks/check_protected_branch.py
+        language: system
+        pass_filenames: false
+      - id: branch-naming-policy
+        name: Validate branch naming policy
+        entry: python scripts/git_hooks/check_branch_naming.py
+        language: system
+        pass_filenames: false
+      - id: gitleaks
+        name: Run gitleaks (secret scanning)
+        entry: python scripts/git_hooks/run_gitleaks.py
+        language: system
+        pass_filenames: false
+        # Skips gracefully if gitleaks binary is not installed.
+        # Install with: https://github.com/gitleaks/gitleaks#installing
