@@ -1,0 +1,25 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+
+workspace/agent_sandbox/*
+!workspace/agent_sandbox/.gitkeep
+
+.idea/
+.vscode/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
