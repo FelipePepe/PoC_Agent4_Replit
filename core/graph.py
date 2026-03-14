@@ -25,7 +25,6 @@ from core.state import AgentState
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = 'claude-sonnet-4-5'
-_DEFAULT_MAX_ITERATIONS = 10
 
 
 @dataclass(slots=True)
@@ -37,6 +36,94 @@ def build_llm(cfg: GraphConfig | None = None) -> BaseChatModel:
     """Instantiate the primary LLM.  Extracted so tests can patch it easily."""
     resolved = cfg or GraphConfig()
     return ChatAnthropic(model=resolved.model_name)  # type: ignore[call-arg]
+
+
+# ── Node factories ─────────────────────────────────────────────────────────── #
+
+
+def _make_supervisor_node(bound_llm: BaseChatModel):
+    """Return a supervisor node function closed over *bound_llm*."""
+
+    def supervisor_node(state: AgentState) -> dict:
+        """Calls the LLM (with tools bound) and appends the response."""
+        logger.info(
+            'supervisor_node — task_id=%s messages=%d tool_calls_so_far=%d',
+            state.get('task_id', '?'),
+            len(state.get('messages', [])),
+            len(state.get('tool_calls', [])),
+        )
+        response = bound_llm.invoke(state['messages'])
+        logger.info(
+            'supervisor_node response — has_tool_calls=%s',
+            bool(getattr(response, 'tool_calls', None)),
+        )
+        return {
+            'messages': state['messages'] + [response],
+            'active_agent': 'supervisor',
+        }
+
+    return supervisor_node
+
+
+def _make_tool_executor_node(tool_map: dict):
+    """Return a tool-executor node function closed over *tool_map*."""
+
+    def tool_executor_node(state: AgentState) -> dict:
+        """Execute every tool call present in the last AIMessage."""
+        last = state['messages'][-1]
+        tool_results: list[ToolMessage] = []
+        new_tool_calls = list(state.get('tool_calls') or [])
+
+        for tc in last.tool_calls:
+            tool = tool_map.get(tc['name'])
+            logger.info('tool_executor — executing tool=%s args=%s', tc['name'], tc['args'])
+            result = tool.invoke(tc['args']) if tool is not None else f"Tool '{tc['name']}' not found."
+            tool_results.append(ToolMessage(content=str(result), tool_call_id=tc['id']))
+            new_tool_calls.append(tc)
+
+        return {
+            'messages': state['messages'] + tool_results,
+            'tool_calls': new_tool_calls,
+        }
+
+    return tool_executor_node
+
+
+def _verifier_node(state: AgentState) -> dict:
+    """Validate / summarise the completed task and mark it done."""
+    logger.info(
+        'verifier_node — task_id=%s total_tool_calls=%d',
+        state.get('task_id', '?'),
+        len(state.get('tool_calls') or []),
+    )
+    return {'active_agent': 'verifier'}
+
+
+def _make_router(max_iterations: int):
+    """Return a routing function closed over *max_iterations*."""
+
+    def route_after_supervisor(state: AgentState) -> Literal['tool_executor', 'verifier']:
+        last = state['messages'][-1]
+        has_tool_calls = bool(getattr(last, 'tool_calls', None))
+        iterations_done = len(state.get('tool_calls') or [])
+        if has_tool_calls and iterations_done < max_iterations:
+            return 'tool_executor'
+        return 'verifier'
+
+    return route_after_supervisor
+
+
+# ── Public API ─────────────────────────────────────────────────────────────── #
+
+
+def _resolve_app_config(app_config_workspace: Path | str | None):
+    """Build an AppConfig from an optional workspace path."""
+    from core.config import create_default_config
+
+    if app_config_workspace is not None:
+        workspace = Path(app_config_workspace)
+        return create_default_config(project_root=workspace.parent, workspace_dir=workspace)
+    return create_default_config(project_root=Path('.'))
 
 
 def build_graph(
@@ -59,105 +146,21 @@ def build_graph(
         Maximum tool-execution rounds before forcing termination.
         Defaults to ``AppConfig.max_agent_iterations`` (10).
     """
-    from core.config import AppConfig, create_default_config
     from core.tools import make_tools
 
-    resolved_cfg = cfg or GraphConfig()
-    llm = build_llm(resolved_cfg)
-
-    # --- AppConfig / tools setup -----------------------------------------------
-    if app_config_workspace is not None:
-        workspace = Path(app_config_workspace)
-        project_root = workspace.parent
-        app_config = create_default_config(
-            project_root=project_root,
-            workspace_dir=workspace,
-        )
-    else:
-        app_config = create_default_config(project_root=Path('.'))
-
-    _max_iterations: int = (
-        max_iterations
-        if max_iterations is not None
-        else app_config.max_agent_iterations
-    )
+    llm = build_llm(cfg or GraphConfig())
+    app_config = _resolve_app_config(app_config_workspace)
+    resolved_max = max_iterations if max_iterations is not None else app_config.max_agent_iterations
 
     tools = make_tools(app_config)
-    tool_map = {t.name: t for t in tools}
     bound_llm = llm.bind_tools(tools)
 
-    # --- Nodes -----------------------------------------------------------------
-
-    def supervisor_node(state: AgentState) -> dict:
-        """Calls the LLM (with tools bound) and appends the response."""
-        logger.info(
-            'supervisor_node — task_id=%s messages=%d tool_calls_so_far=%d',
-            state.get('task_id', '?'),
-            len(state.get('messages', [])),
-            len(state.get('tool_calls', [])),
-        )
-        response = bound_llm.invoke(state['messages'])
-        logger.info(
-            'supervisor_node response — has_tool_calls=%s',
-            bool(getattr(response, 'tool_calls', None)),
-        )
-        return {
-            'messages': state['messages'] + [response],
-            'active_agent': 'supervisor',
-        }
-
-    def tool_executor_node(state: AgentState) -> dict:
-        """Execute every tool call present in the last AIMessage."""
-        last = state['messages'][-1]
-        tool_results: list[ToolMessage] = []
-        new_tool_calls = list(state.get('tool_calls') or [])
-
-        for tc in last.tool_calls:
-            tool = tool_map.get(tc['name'])
-            logger.info('tool_executor — executing tool=%s args=%s', tc['name'], tc['args'])
-            if tool is not None:
-                result = tool.invoke(tc['args'])
-            else:
-                result = f"Tool '{tc['name']}' not found."
-            tool_results.append(
-                ToolMessage(content=str(result), tool_call_id=tc['id'])
-            )
-            new_tool_calls.append(tc)
-
-        return {
-            'messages': state['messages'] + tool_results,
-            'tool_calls': new_tool_calls,
-        }
-
-    def verifier_node(state: AgentState) -> dict:
-        """Validate / summarise the completed task and mark it done."""
-        logger.info(
-            'verifier_node — task_id=%s total_tool_calls=%d',
-            state.get('task_id', '?'),
-            len(state.get('tool_calls') or []),
-        )
-        return {'active_agent': 'verifier'}
-
-    # --- Routing ---------------------------------------------------------------
-
-    def route_after_supervisor(
-        state: AgentState,
-    ) -> Literal['tool_executor', 'verifier']:
-        last = state['messages'][-1]
-        has_tool_calls = bool(getattr(last, 'tool_calls', None))
-        iterations_done = len(state.get('tool_calls') or [])
-        if has_tool_calls and iterations_done < _max_iterations:
-            return 'tool_executor'
-        return 'verifier'
-
-    # --- Graph wiring ----------------------------------------------------------
     builder = StateGraph(AgentState)
-    builder.add_node('supervisor', supervisor_node)
-    builder.add_node('tool_executor', tool_executor_node)
-    builder.add_node('verifier', verifier_node)
-
+    builder.add_node('supervisor', _make_supervisor_node(bound_llm))
+    builder.add_node('tool_executor', _make_tool_executor_node({t.name: t for t in tools}))
+    builder.add_node('verifier', _verifier_node)
     builder.set_entry_point('supervisor')
-    builder.add_conditional_edges('supervisor', route_after_supervisor)
+    builder.add_conditional_edges('supervisor', _make_router(resolved_max))
     builder.add_edge('tool_executor', 'supervisor')
     builder.add_edge('verifier', END)
 

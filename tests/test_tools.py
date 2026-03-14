@@ -225,3 +225,45 @@ class TestMakeTools:
         search_tool = next(t for t in tools if t.name == 'search_web')
         result = search_tool.invoke({'query': 'test query'})
         assert isinstance(result, str)
+
+    def test_read_file_tool_returns_error_on_path_escape(
+        self, cfg: AppConfig
+    ) -> None:
+        tools = make_tools(cfg)
+        read_tool = next(t for t in tools if t.name == 'read_file')
+        result = read_tool.invoke({'path': '../escape.txt'})
+        assert result.startswith('ERROR:')
+
+    def test_read_file_tool_returns_error_on_missing_file(
+        self, cfg: AppConfig
+    ) -> None:
+        tools = make_tools(cfg)
+        read_tool = next(t for t in tools if t.name == 'read_file')
+        result = read_tool.invoke({'path': 'no_such_file.txt'})
+        assert result.startswith('ERROR:')
+
+    def test_write_file_tool_returns_error_on_path_escape(
+        self, cfg: AppConfig
+    ) -> None:
+        tools = make_tools(cfg)
+        write_tool = next(t for t in tools if t.name == 'write_file')
+        result = write_tool.invoke({'path': '../escape.txt', 'content': 'x'})
+        assert result.startswith('ERROR:')
+
+    def test_execute_shell_tool_returns_error_on_disallowed_command(
+        self, cfg: AppConfig
+    ) -> None:
+        tools = make_tools(cfg)
+        shell_tool = next(t for t in tools if t.name == 'execute_shell')
+        result = shell_tool.invoke({'command': 'rm -rf .'})
+        assert result.startswith('ERROR:')
+
+    def test_execute_shell_tool_returns_error_on_timeout(
+        self, cfg: AppConfig
+    ) -> None:
+        tools = make_tools(cfg)
+        shell_tool = next(t for t in tools if t.name == 'execute_shell')
+        result = shell_tool.invoke(
+            {'command': 'python -c "import time; time.sleep(60)"'}
+        )
+        assert result.startswith('ERROR:')
