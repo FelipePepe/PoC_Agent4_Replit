@@ -9,6 +9,11 @@
 - **Postura de seguridad**: deny-by-default, mínimo privilegio, validación estricta, auditoría y secretos solo en backend.
 - **Modularidad**: los ficheros de agentes deben mantenerse pequeños y cohesionados; objetivo `<= 200` líneas por fichero y refactor obligatorio al acercarse a `300`.
 
+## 1.1 Calidad de código
+- **Cobertura mínima**: 90% obligatoria — `pytest` falla si no se alcanza (`--cov-fail-under=90`). Cobertura actual: 98.67%.
+- **Análisis estático**: SonarQube local (proyecto `poc-agent4-replit`), ejecutado en pre-push y mediante `scripts/dev/run_sonar.sh`.
+- **Reporte de cobertura**: `coverage.xml` (formato Cobertura) generado automáticamente en cada `pytest`, consumido por SonarQube.
+
 ## 2. Diseño de API
 Rutas principales:
 - `POST /api/agent/tasks`

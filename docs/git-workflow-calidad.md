@@ -4,8 +4,10 @@
 Definir la gobernanza del repositorio, el flujo de ramas y los controles de calidad/seguridad que deben aplicarse antes de integrar cambios.
 
 ## 2. Repositorio remoto
-- El remoto canónico del proyecto es **GitHub**.
-- Las ramas `main` y `develop` deben configurarse como **protegidas**.
+- Remoto canónico: **GitHub** → `https://github.com/FelipePepe/PoC_Agent4_Replit` (público)
+- Ramas `main` y `develop` configuradas como **protegidas** (PR obligatoria, no force push, no delete).
+- Rama por defecto: `main`.
+- Rama activa de trabajo: `feature/core-base-implementation`.
 
 ## 3. Modelo de ramas
 Ramas permanentes:
@@ -222,10 +224,26 @@ https://github.com/gitleaks/gitleaks/releases
 ---
 
 ## 7. SonarQube
-- SonarQube corre en local (Docker).
+- SonarQube corre en local (Docker, contenedor `sonarqube-custom`, http://localhost:9000).
+- Proyecto: `poc-agent4-replit` | Perfil de calidad: *Sonar way* (306 reglas Python activas).
 - Mientras siga siendo local, **no** se integrará en GitHub-hosted Actions.
 - Su uso previsto es mediante hooks locales o scripts manuales previos a push/PR.
 - Si en el futuro existe un runner self-hosted con acceso al servicio, podrá reevaluarse la integración en Actions.
+
+### Configuración técnica
+- `sonar-project.properties` en la raíz del proyecto (no incluir el token aquí).
+- `sonar.python.coverage.reportPaths=coverage.xml` — SonarQube lee el XML de Cobertura, no el output de terminal.
+- El token se gestiona via variable de entorno `SONAR_TOKEN` en `.env` (gitignoreado).
+
+### Cobertura
+- `coverage.xml` se genera automáticamente con cada `pytest` (configurado en `pyproject.toml`).
+- Requisito mínimo: **90%** de cobertura — la suite falla si no se alcanza (`--cov-fail-under=90`).
+- Cobertura actual: **98.67%**.
+- Para que SonarQube resuelva los paths correctamente: `source = ["."]` + `relative_files = true` en `[tool.coverage.run]`.
+
+### Scripts de análisis
+- `scripts/dev/run_sonar.sh` — ejecuta análisis manual vía Docker (genera `coverage.xml` primero).
+- `scripts/git_hooks/run_sonar.py` — wrapper para el hook `pre-push` (falla de forma controlada si Docker o token no están disponibles).
 
 ## 8. GitHub Actions recomendadas
 Checks remotos recomendados para PRs:
