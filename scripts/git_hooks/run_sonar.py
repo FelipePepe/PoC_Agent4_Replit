@@ -1,11 +1,12 @@
-"""Wrapper for local SonarQube analysis via Docker.
+"""Wrapper for local SonarQube analysis via Docker — runs in the background.
 
-Runs sonar-scanner-cli (Docker) on pre-push if:
-  - Docker is installed and running.
-  - SONAR_TOKEN is set (env var or .env file).
+Triggered on post-push so it never blocks the push.  The scanner runs as a
+detached background process; its output is written to .sonar_analysis.log in
+the project root.
 
-Skips gracefully if either condition is not met.
-Set SONAR_TOKEN in your .env file or export it before pushing.
+Skips gracefully if:
+  - Docker is not installed or not running.
+  - SONAR_TOKEN is not set (env var or .env file).
 """
 from __future__ import annotations
 
@@ -14,6 +15,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+LOG_FILE = Path(".sonar_analysis.log")
 
 
 def _load_token_from_env_file() -> str:
@@ -30,7 +33,7 @@ def main() -> int:
     # ── Check Docker availability ─────────────────────────────────────────── #
     if shutil.which("docker") is None:
         print(
-            "docker not found — skipping SonarQube analysis.",
+            "[sonar] docker not found — skipping SonarQube analysis.",
             file=sys.stderr,
         )
         return 0
@@ -45,13 +48,22 @@ def main() -> int:
         )
         return 0
 
-    # ── Delegate to run_sonar.sh ──────────────────────────────────────────── #
+    # ── Launch scanner in the background (non-blocking) ───────────────────── #
+    log_fd = LOG_FILE.open("w", encoding="utf-8")
     env = {**os.environ, "SONAR_TOKEN": token}
-    result = subprocess.run(
+    subprocess.Popen(  # noqa: S603 — controlled command, allowlisted
         ["bash", "scripts/dev/run_sonar.sh"],
         env=env,
+        stdout=log_fd,
+        stderr=log_fd,
+        start_new_session=True,   # detach from parent so push is not blocked
     )
-    return result.returncode
+    print(
+        f"[sonar] SonarQube analysis launched in the background.\n"
+        f"  Follow progress: tail -f {LOG_FILE}",
+        file=sys.stderr,
+    )
+    return 0
 
 
 if __name__ == "__main__":

@@ -28,11 +28,18 @@ repos:
         pass_filenames: false
         # Skips gracefully if gitleaks binary is not installed.
         # Install with: https://github.com/gitleaks/gitleaks#installing
+      - id: check-coverage
+        name: Check test coverage (≥ 99%)
+        entry: python scripts/git_hooks/check_coverage.py
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+        # Blocks the commit if coverage drops below 99%.
       - id: sonar-analysis
-        name: Run SonarQube analysis (local Docker)
+        name: Run SonarQube analysis (background, non-blocking)
         entry: python scripts/git_hooks/run_sonar.py
         language: system
         pass_filenames: false
         stages: [pre-push]
+        # Launches sonar-scanner in the background after push — non-blocking.
         # Skips gracefully if Docker is unavailable or SONAR_TOKEN is not set.
-        # Set SONAR_TOKEN in .env or export it to enable SonarQube on pre-push.

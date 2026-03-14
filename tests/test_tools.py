@@ -167,6 +167,11 @@ class TestExecuteShell:
         with pytest.raises(ShellTimeoutError):
             execute_shell('python -c "import time; time.sleep(5)"', fast_cfg)
 
+    def test_rejects_invalid_shell_syntax(self, cfg: AppConfig) -> None:
+        """Unmatched quote → shlex.split ValueError → CommandNotAllowedError."""
+        with pytest.raises(CommandNotAllowedError, match='Invalid command syntax'):
+            execute_shell("echo 'unclosed", cfg)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # search_web
@@ -249,6 +254,14 @@ class TestMakeTools:
         write_tool = next(t for t in tools if t.name == 'write_file')
         result = write_tool.invoke({'path': '../escape.txt', 'content': 'x'})
         assert result.startswith('ERROR:')
+
+    def test_execute_shell_tool_returns_error_on_nonzero_rc(
+        self, sandbox: Path, cfg: AppConfig
+    ) -> None:
+        tools = make_tools(cfg)
+        shell_tool = next(t for t in tools if t.name == 'execute_shell')
+        result = shell_tool.invoke({'command': 'python -c "import sys; sys.exit(1)"'})
+        assert result.startswith('ERROR (rc=')
 
     def test_execute_shell_tool_returns_error_on_disallowed_command(
         self, cfg: AppConfig

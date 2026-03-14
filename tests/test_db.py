@@ -40,6 +40,15 @@ class TestInitDb:
         conn.close()
         assert row[0] == 'wal'
 
+    def test_wal_mode_disabled_skips_pragma(self, tmp_path):
+        db_path = tmp_path / 'test.db'
+        cfg = DatabaseConfig(db_path=db_path, wal_mode=False)
+        init_db(cfg)
+        conn = sqlite3.connect(str(db_path))
+        row = conn.execute('PRAGMA journal_mode;').fetchone()
+        conn.close()
+        assert row[0] == 'delete'  # default SQLite journal mode
+
     def test_snapshots_table_created(self, tmp_path):
         db_path = tmp_path / 'test.db'
         cfg = DatabaseConfig(db_path=db_path)

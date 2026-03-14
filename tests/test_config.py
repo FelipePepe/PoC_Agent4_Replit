@@ -49,3 +49,16 @@ def test_config_rejects_non_positive_limits(
 def test_config_rejects_workspace_outside_project_root() -> None:
     with pytest.raises(ConfigValidationError):
         create_default_config(project_root=PROJECT_ROOT, workspace_dir=Path('/tmp/outside'))
+
+
+def test_config_rejects_empty_allowed_shell_commands() -> None:
+    with pytest.raises(ConfigValidationError):
+        AppConfig(
+            api_version='v1',
+            workspace_dir=PROJECT_ROOT / 'workspace' / 'agent_sandbox',
+            shell_timeout_seconds=10,
+            max_agent_iterations=10,
+            allowed_shell_commands=(),
+            secret_redaction_enabled=True,
+            encryption_at_rest_required=True,
+        )
