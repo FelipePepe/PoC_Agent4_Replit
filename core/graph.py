@@ -1,19 +1,23 @@
-"""Minimal LangGraph graph — Fase 0 exit criterion.
+"""LangGraph graph — Fase 1: ReAct loop with sandboxed tools.
 
-Defines a single-node graph with a 'supervisor' node that calls the LLM
-and returns the response. No conditional edges — just entry → supervisor → END.
+Graph topology:
+    START → supervisor → tool_executor → supervisor → … → verifier → END
+                  ↓ (no tool calls or max iterations reached)
+               verifier → END
 
-Usage:
-    graph = build_graph()
-    result = graph.invoke(create_initial_state(task_id="abc"))
+The supervisor node binds the LLM to the sandboxed tools and decides, via
+conditional routing, whether to execute tool calls or hand off to verifier.
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Literal
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import ToolMessage
 from langgraph.graph import END, StateGraph
 
 from core.state import AgentState
@@ -21,6 +25,7 @@ from core.state import AgentState
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = 'claude-sonnet-4-5'
+_DEFAULT_MAX_ITERATIONS = 10
 
 
 @dataclass(slots=True)
@@ -34,31 +39,126 @@ def build_llm(cfg: GraphConfig | None = None) -> BaseChatModel:
     return ChatAnthropic(model=resolved.model_name)  # type: ignore[call-arg]
 
 
-def build_graph(cfg: GraphConfig | None = None):
-    """Compile and return the minimal LangGraph graph for Fase 0.
+def build_graph(
+    cfg: GraphConfig | None = None,
+    *,
+    app_config_workspace: Path | str | None = None,
+    max_iterations: int | None = None,
+):
+    """Compile and return the ReAct LangGraph graph.
 
-    Graph topology:
-        START → supervisor → END
+    Parameters
+    ----------
+    cfg:
+        LangGraph model configuration (model name, etc.).
+    app_config_workspace:
+        Path to the sandbox workspace directory fed to AppConfig / tools.
+        When *None* the default ``workspace/agent_sandbox`` inside the
+        current project root is used.
+    max_iterations:
+        Maximum tool-execution rounds before forcing termination.
+        Defaults to ``AppConfig.max_agent_iterations`` (10).
     """
-    llm = build_llm(cfg)
+    from core.config import AppConfig, create_default_config
+    from core.tools import make_tools
+
+    resolved_cfg = cfg or GraphConfig()
+    llm = build_llm(resolved_cfg)
+
+    # --- AppConfig / tools setup -----------------------------------------------
+    if app_config_workspace is not None:
+        workspace = Path(app_config_workspace)
+        project_root = workspace.parent
+        app_config = create_default_config(
+            project_root=project_root,
+            workspace_dir=workspace,
+        )
+    else:
+        app_config = create_default_config(project_root=Path('.'))
+
+    _max_iterations: int = (
+        max_iterations
+        if max_iterations is not None
+        else app_config.max_agent_iterations
+    )
+
+    tools = make_tools(app_config)
+    tool_map = {t.name: t for t in tools}
+    bound_llm = llm.bind_tools(tools)
+
+    # --- Nodes -----------------------------------------------------------------
 
     def supervisor_node(state: AgentState) -> dict:
-        """Single supervisor node: sends messages to the LLM and appends reply."""
+        """Calls the LLM (with tools bound) and appends the response."""
         logger.info(
-            'supervisor_node called — task_id=%s messages=%d',
+            'supervisor_node — task_id=%s messages=%d tool_calls_so_far=%d',
             state.get('task_id', '?'),
             len(state.get('messages', [])),
+            len(state.get('tool_calls', [])),
         )
-        response = llm.invoke(state['messages'])
-        logger.info('supervisor_node response — content_len=%d', len(str(response.content)))
+        response = bound_llm.invoke(state['messages'])
+        logger.info(
+            'supervisor_node response — has_tool_calls=%s',
+            bool(getattr(response, 'tool_calls', None)),
+        )
         return {
             'messages': state['messages'] + [response],
             'active_agent': 'supervisor',
         }
 
+    def tool_executor_node(state: AgentState) -> dict:
+        """Execute every tool call present in the last AIMessage."""
+        last = state['messages'][-1]
+        tool_results: list[ToolMessage] = []
+        new_tool_calls = list(state.get('tool_calls') or [])
+
+        for tc in last.tool_calls:
+            tool = tool_map.get(tc['name'])
+            logger.info('tool_executor — executing tool=%s args=%s', tc['name'], tc['args'])
+            if tool is not None:
+                result = tool.invoke(tc['args'])
+            else:
+                result = f"Tool '{tc['name']}' not found."
+            tool_results.append(
+                ToolMessage(content=str(result), tool_call_id=tc['id'])
+            )
+            new_tool_calls.append(tc)
+
+        return {
+            'messages': state['messages'] + tool_results,
+            'tool_calls': new_tool_calls,
+        }
+
+    def verifier_node(state: AgentState) -> dict:
+        """Validate / summarise the completed task and mark it done."""
+        logger.info(
+            'verifier_node — task_id=%s total_tool_calls=%d',
+            state.get('task_id', '?'),
+            len(state.get('tool_calls') or []),
+        )
+        return {'active_agent': 'verifier'}
+
+    # --- Routing ---------------------------------------------------------------
+
+    def route_after_supervisor(
+        state: AgentState,
+    ) -> Literal['tool_executor', 'verifier']:
+        last = state['messages'][-1]
+        has_tool_calls = bool(getattr(last, 'tool_calls', None))
+        iterations_done = len(state.get('tool_calls') or [])
+        if has_tool_calls and iterations_done < _max_iterations:
+            return 'tool_executor'
+        return 'verifier'
+
+    # --- Graph wiring ----------------------------------------------------------
     builder = StateGraph(AgentState)
     builder.add_node('supervisor', supervisor_node)
+    builder.add_node('tool_executor', tool_executor_node)
+    builder.add_node('verifier', verifier_node)
+
     builder.set_entry_point('supervisor')
-    builder.add_edge('supervisor', END)
+    builder.add_conditional_edges('supervisor', route_after_supervisor)
+    builder.add_edge('tool_executor', 'supervisor')
+    builder.add_edge('verifier', END)
 
     return builder.compile()
