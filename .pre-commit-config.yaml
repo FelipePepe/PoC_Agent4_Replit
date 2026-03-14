@@ -28,3 +28,11 @@ repos:
         pass_filenames: false
         # Skips gracefully if gitleaks binary is not installed.
         # Install with: https://github.com/gitleaks/gitleaks#installing
+      - id: sonar-analysis
+        name: Run SonarQube analysis (local Docker)
+        entry: python scripts/git_hooks/run_sonar.py
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        # Skips gracefully if Docker is unavailable or SONAR_TOKEN is not set.
+        # Set SONAR_TOKEN in .env or export it to enable SonarQube on pre-push.
