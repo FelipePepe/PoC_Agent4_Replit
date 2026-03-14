@@ -32,16 +32,26 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "-q --cov=core --cov=agents --cov-branch --cov-fail-under=90 --cov-report=term-missing --cov-report=xml:coverage.xml"
+addopts = "-q --cov=. --cov-branch --cov-fail-under=90 --cov-report=term-missing --cov-report=xml:coverage.xml"
 
 [tool.coverage.run]
 branch = true
-source = ["core", "agents"]
-omit = ["*/tests/*", "*/__pycache__/*"]
+source = ["."]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    ".venv/*",
+    "build/*",
+    "scripts/*",
+    "*.egg-info/*",
+    "workspace/*",
+]
+relative_files = true
 
 [tool.coverage.report]
 fail_under = 90
 show_missing = true
+include = ["core/*", "agents/*"]
 
 [tool.setuptools.packages.find]
 include = ["core*", "agents*"]

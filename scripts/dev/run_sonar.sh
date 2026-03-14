@@ -32,23 +32,28 @@ if [ -z "${SONAR_TOKEN:-}" ]; then
 fi
 
 # ── Generate coverage report for SonarQube ────────────────────────────────── #
-echo "Generating coverage report (coverage.xml)..."
-if command -v python3 &>/dev/null; then
-    python3 -m pytest tests/ \
-        --cov=core --cov=agents \
-        --cov-branch \
-        --cov-report=xml:"$PROJECT_ROOT/coverage.xml" \
-        -q --no-header 2>&1 || {
-        echo "WARNING: tests failed or coverage report could not be generated" >&2
-    }
+# ── Resolve Python from venv or PATH ──────────────────────────────────────── #
+PYTHON_BIN=""
+if [ -f "$PROJECT_ROOT/.venv/bin/python" ]; then
+    PYTHON_BIN="$PROJECT_ROOT/.venv/bin/python"
+elif command -v python3 &>/dev/null; then
+    PYTHON_BIN="python3"
 elif command -v python &>/dev/null; then
-    python -m pytest tests/ \
-        --cov=core --cov=agents \
-        --cov-branch \
-        --cov-report=xml:"$PROJECT_ROOT/coverage.xml" \
-        -q --no-header 2>&1 || {
+    PYTHON_BIN="python"
+fi
+
+# ── Generate coverage report for SonarQube ────────────────────────────────── #
+echo "Generating coverage report (coverage.xml)..."
+if [ -n "$PYTHON_BIN" ]; then
+    # pyproject.toml addopts already includes --cov=. --cov-report=xml:coverage.xml
+    (cd "$PROJECT_ROOT" && "$PYTHON_BIN" -m pytest tests/ -q --no-header 2>&1) || {
         echo "WARNING: tests failed or coverage report could not be generated" >&2
     }
+    if [ ! -f "$PROJECT_ROOT/coverage.xml" ]; then
+        echo "WARNING: coverage.xml not found after test run" >&2
+    fi
+else
+    echo "WARNING: no Python interpreter found; skipping coverage generation" >&2
 fi
 
 # ── Run sonar-scanner via Docker ───────────────────────────────────────────── #
