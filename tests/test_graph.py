@@ -215,7 +215,7 @@ class TestReActLoop:
             graph = build_graph(app_config_workspace=sandbox, max_iterations=3)
             initial = create_initial_state(task_id='t-max')
             initial['messages'] = [HumanMessage(content='loop forever')]
-            result = graph.invoke(initial)
+            graph.invoke(initial)
 
         # LLM must have been called at most max+1 times (one final pass to check)
         assert bound.invoke.call_count <= 4

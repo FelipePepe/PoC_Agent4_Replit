@@ -45,7 +45,7 @@ def _parse_coverage_xml() -> float | None:
     if not COVERAGE_XML.exists():
         return None
     try:
-        tree = ET.parse(COVERAGE_XML)  # noqa: S314 — local file, safe
+        tree = ET.parse(COVERAGE_XML)  # NOSONAR — parsing a local project file, not user input
         root = tree.getroot()
         line_rate = float(root.attrib.get("line-rate", "0"))
         return round(line_rate * 100, 2)

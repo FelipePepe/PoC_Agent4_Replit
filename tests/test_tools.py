@@ -44,9 +44,7 @@ def cfg(sandbox: Path, tmp_path: Path) -> AppConfig:
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # read_file
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class TestReadFile:
@@ -79,9 +77,7 @@ class TestReadFile:
             read_file('../../etc/shadow', cfg)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # write_file
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class TestWriteFile:
@@ -109,9 +105,7 @@ class TestWriteFile:
             write_file('/tmp/evil.txt', 'pwned', cfg)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # execute_shell
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class TestExecuteShell:
@@ -135,14 +129,14 @@ class TestExecuteShell:
             execute_shell('python; rm -rf /', cfg)
 
     def test_captures_stdout(self, sandbox: Path, cfg: AppConfig) -> None:
-        rc, stdout, stderr = execute_shell('python -c "print(42)"', cfg)
+        rc, stdout, _ = execute_shell('python -c "print(42)"', cfg)
         assert rc == 0
         assert '42' in stdout
 
     def test_captures_stderr_on_error(
         self, sandbox: Path, cfg: AppConfig
     ) -> None:
-        rc, stdout, stderr = execute_shell(
+        rc, _, _ = execute_shell(
             'python -c "import sys; sys.exit(1)"', cfg
         )
         assert rc == 1
@@ -173,9 +167,7 @@ class TestExecuteShell:
             execute_shell("echo 'unclosed", cfg)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # search_web
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class TestSearchWeb:

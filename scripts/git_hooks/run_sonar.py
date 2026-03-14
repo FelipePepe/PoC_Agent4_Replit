@@ -29,7 +29,7 @@ def _load_token_from_env_file() -> str:
     return ""
 
 
-def main() -> int:
+def main() -> int:  # NOSONAR — hook always returns 0: non-blocking by design, push must never be blocked
     # ── Check Docker availability ─────────────────────────────────────────── #
     if shutil.which("docker") is None:
         print(
@@ -51,7 +51,7 @@ def main() -> int:
     # ── Launch scanner in the background (non-blocking) ───────────────────── #
     log_fd = LOG_FILE.open("w", encoding="utf-8")
     env = {**os.environ, "SONAR_TOKEN": token}
-    subprocess.Popen(  # noqa: S603 — controlled command, allowlisted
+    subprocess.Popen(  # NOSONAR — controlled command, allowlisted path
         ["bash", "scripts/dev/run_sonar.sh"],
         env=env,
         stdout=log_fd,
