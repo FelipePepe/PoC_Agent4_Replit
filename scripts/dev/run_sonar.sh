@@ -31,6 +31,26 @@ if [ -z "${SONAR_TOKEN:-}" ]; then
     exit 1
 fi
 
+# ── Generate coverage report for SonarQube ────────────────────────────────── #
+echo "Generating coverage report (coverage.xml)..."
+if command -v python3 &>/dev/null; then
+    python3 -m pytest tests/ \
+        --cov=core --cov=agents \
+        --cov-branch \
+        --cov-report=xml:"$PROJECT_ROOT/coverage.xml" \
+        -q --no-header 2>&1 || {
+        echo "WARNING: tests failed or coverage report could not be generated" >&2
+    }
+elif command -v python &>/dev/null; then
+    python -m pytest tests/ \
+        --cov=core --cov=agents \
+        --cov-branch \
+        --cov-report=xml:"$PROJECT_ROOT/coverage.xml" \
+        -q --no-header 2>&1 || {
+        echo "WARNING: tests failed or coverage report could not be generated" >&2
+    }
+fi
+
 # ── Run sonar-scanner via Docker ───────────────────────────────────────────── #
 echo "Running SonarQube analysis for project: poc-agent4-replit"
 docker run --rm \
